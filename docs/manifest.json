@@ -1,0 +1,13 @@
+{
+  "latest": "20251218",
+  "frames": [
+    { "date": "20251121", "offset": -27, "type": "observed" },
+    { "date": "20251122", "offset": -26, "type": "observed" },
+    ...
+    { "date": "20251218", "offset": 0, "type": "observed" },
+    { "date": "20251122", "offset": 1, "type": "forecast" },
+    { "date": "20251123", "offset": 2, "type": "forecast" },
+    ...
+    { "date": "20251121", "offset": 27, "type": "forecast" }
+  ]
+}
