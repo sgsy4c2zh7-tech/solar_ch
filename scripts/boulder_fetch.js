@@ -1,90 +1,98 @@
 // scripts/boulder_fetch.js
-// Usage: node scripts/boulder_fetch.js
-// Requires: Node 18+ (fetch available)
+// Fetch NOAA/NGDC Boulder full-sun drawings (synoptic) and save to docs/boulder/YYYYMMDD.png
+// Node 18+ (Node 20 recommended)
 
-import fs from "fs";
-import path from "path";
+const fs = require("fs");
+const path = require("path");
 
-const BASE = "https://www.ngdc.noaa.gov/stp/space-weather/solar-data/solar-imagery/composites/full-sun-drawings/boulder";
+const OUT_DIR = path.join(process.cwd(), "docs", "boulder");
+fs.mkdirSync(OUT_DIR, { recursive: true });
 
-function ensureDir(p){ fs.mkdirSync(p, { recursive:true }); }
+// 取得したい日数（manifest の observed 期間と合わせるなら 28日とか）
+const DAYS = 28;
 
-function ymdParts(ymd){
-  return { y: ymd.slice(0,4), m: ymd.slice(4,6), d: ymd.slice(6,8) };
+// NGDCのページ（ここから直接画像URLを決め打ちする方式だと失敗しやすいので、まずHTMLを取る）
+const BASE_PAGE =
+  "https://www.ngdc.noaa.gov/stp/space-weather/solar-data/solar-imagery/composites/full-sun-drawings/boulder/";
+
+function ymdUTC(d) {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}${m}${day}`;
 }
 
-async function fetchText(url){
+async function fetchText(url) {
   const r = await fetch(url, { cache: "no-store" });
-  if(!r.ok) throw new Error(`HTTP ${r.status} ${url}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status} ${url}`);
   return await r.text();
 }
 
-async function fetchBin(url){
+async function fetchBin(url) {
   const r = await fetch(url, { cache: "no-store" });
-  if(!r.ok) throw new Error(`HTTP ${r.status} ${url}`);
-  const ab = await r.arrayBuffer();
-  return Buffer.from(ab);
+  if (!r.ok) throw new Error(`HTTP ${r.status} ${url}`);
+  const buf = Buffer.from(await r.arrayBuffer());
+  return buf;
 }
 
-function pickLatestForDate(html, ymd){
-  // pick max HHMM for boul_neutl_fd_YYYYMMDD_HHMM.jpg
-  const re = new RegExp(`boul_neutl_fd_${ymd}_(\\d{4})\\.jpg`, "g");
-  let m, best = null;
-  while((m = re.exec(html)) !== null){
-    const hhmm = parseInt(m[1], 10);
-    if(best === null || hhmm > best.hhmm){
-      best = { hhmm, filename: `boul_neutl_fd_${ymd}_${m[1]}.jpg` };
-    }
-  }
-  return best; // or null
+// ページHTMLから「日付っぽい画像リンク」を探す（jpg/png/gifなど何でも）
+function findImageUrlForDate(html, ymd) {
+  // ありがちなパターンを広めに拾う（ymd を含むファイル名）
+  // 例: ...20251222....png / ...20251222....jpg など
+  const re = new RegExp(`href="([^"]*${ymd}[^"]*\\.(?:png|jpg|jpeg|gif))"`, "ig");
+  const m = re.exec(html);
+  if (!m) return null;
+
+  let href = m[1];
+  // 相対→絶対
+  if (href.startsWith("http")) return href;
+  if (href.startsWith("/")) return "https://www.ngdc.noaa.gov" + href;
+  return BASE_PAGE + href;
 }
 
-async function main(){
-  const manifestPath = path.join("docs", "manifest.json");
-  if(!fs.existsSync(manifestPath)){
-    throw new Error(`Missing ${manifestPath}`);
-  }
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-  if(!manifest.frames || !Array.isArray(manifest.frames)){
-    throw new Error("manifest.json has no frames[]");
-  }
+(async () => {
+  console.log("[boulder_fetch] Fetch index page:", BASE_PAGE);
+  const html = await fetchText(BASE_PAGE);
 
-  // 必要な日付（source date として使うので frames[].date を集める）
-  const dates = Array.from(new Set(manifest.frames.map(f => f.date))).sort();
+  let okCount = 0;
+  let failCount = 0;
 
-  const outDir = path.join("docs", "boulder");
-  ensureDir(outDir);
+  for (let i = 0; i < DAYS; i++) {
+    const d = new Date(Date.now() - i * 86400 * 1000);
+    const ymd = ymdUTC(d);
 
-  for(const ymd of dates){
-    const outFile = path.join(outDir, `${ymd}.jpg`);
-    if(fs.existsSync(outFile)) continue;
-
-    const { y, m } = ymdParts(ymd);
-    const dirUrl = `${BASE}/${y}/${m}/`;
-
-    console.log(`[Boulder] ${ymd} -> ${dirUrl}`);
-
-    const html = await fetchText(dirUrl);
-    const best = pickLatestForDate(html, ymd);
-    if(!best){
-      console.warn(`  - Not found in directory listing: ${ymd}`);
+    const imgUrl = findImageUrlForDate(html, ymd);
+    if (!imgUrl) {
+      console.warn(`[boulder_fetch] No image link found in page for ${ymd}`);
+      failCount++;
       continue;
     }
 
-    const fileUrl = `${dirUrl}${best.filename}`;
-    console.log(`  - download ${best.filename}`);
+    const outPath = path.join(OUT_DIR, `${ymd}.png`);
 
-    const buf = await fetchBin(fileUrl);
-    fs.writeFileSync(outFile, buf);
+    try {
+      console.log(`[boulder_fetch] ${ymd} -> ${imgUrl}`);
+      const bin = await fetchBin(imgUrl);
+
+      // 元がjpgでも、とりあえず .png で保存すると中身と拡張子がズレるので、
+      // ここでは「拡張子を保持」したいなら outPath を変えるべき。
+      // ただ、あなたのHTMLが .png 前提なので、ここでは“ファイル名”を .png に固定しつつ、
+      // 中身はそのまま保存する（ブラウザは大抵表示できる）
+      fs.writeFileSync(outPath, bin);
+      okCount++;
+    } catch (e) {
+      console.error(`[boulder_fetch] FAILED ${ymd}:`, e.message);
+      failCount++;
+    }
   }
 
-  // keep file (optional)
-  const keep = path.join(outDir, ".keep");
-  if(!fs.existsSync(keep)) fs.writeFileSync(keep, "");
-  console.log("Done.");
-}
+  console.log(`[boulder_fetch] done. ok=${okCount} fail=${failCount}`);
 
-main().catch(e=>{
+  // 1枚も取れないのは何か壊れてるのでCI落とす
+  if (okCount === 0) {
+    throw new Error("No Boulder synoptic images were downloaded.");
+  }
+})().catch((e) => {
   console.error(e);
   process.exit(1);
 });
