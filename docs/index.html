@@ -66,18 +66,30 @@ const speedVal = document.getElementById('speedVal');
 function fmtOffset(o){ return `D${o>=0?'+':''}${o}`; }
 
 function update(){
+  if (!frames.length) return;
   const f = frames[idx];
-  img.src = `imgs/${f.date}.png`;
+
+  const src = `./imgs/${f.date}.png`;
+
+  img.onerror = () => {
+    note.textContent = `IMAGE load failed: ${src} (file missing or path issue)`;
+  };
+  img.onload = () => {
+    // 表示成功したらエラー文を消す（情報は残すならここを消してOK）
+    // note.textContent = "";
+  };
+
+  img.src = src;
 
   badgeDate.textContent = `UTC ${f.date}`;
   badgeOffset.textContent = fmtOffset(f.offset);
 
   if (f.type === "observed"){
     badgeMode.textContent = "OBSERVED";
-    note.textContent = "Observed: latest day and past 27 days.";
+    note.textContent = `Observed: latest day and past 27 days.  src=${src}`;
   } else {
     badgeMode.textContent = "FORECAST (27-day proxy)";
-    note.textContent = "Forecast/proxy: future frames reuse images from 26–27 days before (solar rotation).";
+    note.textContent = `Forecast/proxy: future frames reuse images from 26–27 days before (solar rotation).  src=${src}`;
   }
 
   slider.value = idx;
@@ -108,9 +120,15 @@ slider.oninput = e=>{ stop(); idx = +e.target.value; update(); };
 
 speed.oninput = ()=>{ speedVal.textContent = `${speed.value} ms`; if(timer) play(); };
 
-fetch('manifest.json')
-  .then(r=>r.json())
+fetch('./manifest.json', { cache: 'no-store' })
+  .then(r => {
+    if(!r.ok) throw new Error(`HTTP ${r.status} while loading manifest.json`);
+    return r.json();
+  })
   .then(m=>{
+    if(!m.frames || !Array.isArray(m.frames) || m.frames.length===0){
+      throw new Error("manifest.json has no frames[]");
+    }
     frames = m.frames;
     slider.max = frames.length - 1;
 
