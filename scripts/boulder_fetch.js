@@ -13,7 +13,7 @@ const DAYS = 28;
 
 // NGDCのページ（ここから直接画像URLを決め打ちする方式だと失敗しやすいので、まずHTMLを取る）
 const BASE_PAGE =
-  "https://www.ngdc.noaa.gov/stp/space-weather/solar-data/solar-imagery/composites/full-sun-drawings/boulder/";
+  "https://www.ngdc.noaa.gov/stp/space-weather/solar-data/solar-imagery/composites/full-sun-drawings/boulder/2026/";
 
 function ymdUTC(d) {
   const y = d.getUTCFullYear();
